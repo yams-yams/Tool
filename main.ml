@@ -11,4 +11,4 @@ let handle action filename =
     | RENAMED_NEW -> Printf.printf "          to: %s\n%!" filename
 
 let () =
-    wait_for_changes "D:\\Cygwin\\home\\uma\\lexifi\\testdir24\\" handle
+    wait_for_changes "D:\\Cygwin\\home\\uma\\lexifi\\testdir\\" handle
