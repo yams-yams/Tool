@@ -4,14 +4,11 @@ external wait_for_changes: string (* directory name *) -> (action -> string -> u
 
 let handle action filename = 
     match action with
-    | ADD -> Printf.printf "Added: %s\n" filename
-    | REMOVE -> Printf.printf "Removed: %s\n" filename
-    | REMOVE -> Printf.printf "Removed: %s\n" filename
-    | MODIFY -> Printf.printf "Modified: %s\n" filename
-    | RENAMED_OLD -> Printf.printf "Renamed from: %s\n" filename
-    | RENAMED_NEW -> Printf.printf "          to: %s\n" filename
-    | _ -> Printf.printf "Unknown action!\n" in
+    | ADD -> Printf.printf "Added: %s\n%!" filename
+    | REMOVE -> Printf.printf "Removed: %s\n%!" filename
+    | MODIFY -> Printf.printf "Modified: %s\n%!" filename
+    | RENAMED_OLD -> Printf.printf "Renamed from: %s\n%!" filename
+    | RENAMED_NEW -> Printf.printf "          to: %s\n%!" filename
 
 let () =
-    Callback.register "Handle callback" handle in 
-    wait_for_changes "D:\\Cygwin\\home\\uma\\lexifi\\testdir\\" handle
+    wait_for_changes "D:\\Cygwin\\home\\uma\\lexifi\\testdir24\\" handle
