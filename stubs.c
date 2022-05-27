@@ -8,6 +8,7 @@
 #include <caml/callback.h>
 #include <caml/osdeps.h>
 #include <caml/memory.h>
+#include <caml/unixsupport.h>
 #include <windows.h>
 #include <assert.h>
 
@@ -31,9 +32,6 @@ caml_wait_for_changes( value vpath, value closure){
     
     //Raises exception if directory cannot be opened
     if (hDir == INVALID_HANDLE_VALUE){
-        //close handle
-        CloseHandle(hDir);
-
         //raise caml exception
         caml_failwith("Directory cannot be found.");
         
@@ -60,15 +58,17 @@ caml_wait_for_changes( value vpath, value closure){
             FILE_NOTIFY_CHANGE_DIR_NAME   |
             FILE_NOTIFY_CHANGE_LAST_WRITE,
             NULL, &overlapped, NULL);
-        
+                   
         //Does not raise exception if directory changes cannot be read
-        /*if (success == false) {
+        if (success == false) {
             CloseHandle(hDir);
             CloseHandle(overlapped.hEvent);
-            caml_failwith("Directory changes cannot be read.");
-        }*/
+            
+            win32_maperr(GetLastError());
+            uerror("ReadDirectoryChangesW", Nothing);
+        }
 
-        DWORD result = WaitForSingleObject(overlapped.hEvent, 0);
+        DWORD result = WaitForSingleObject(overlapped.hEvent, INFINITE);
         
         //Raises exception if WaitForSingleObject fails        
         if (result == WAIT_FAILED) {
