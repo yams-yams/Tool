@@ -13,12 +13,33 @@
 #include <assert.h>
 
 CAMLprim value
-caml_wait_for_changes( value vpath, value closure){
+caml_wait_for_changes( value path_list, value closure){
     
-    CAMLparam2(vpath, closure);    
-    CAMLlocal2(action, filename);
+    CAMLparam2(path_list, closure);    
+    CAMLlocal4(p, head, action, filename);
     
-    const char *path = String_val(vpath);
+    int count = 0;
+    p = path_list;    
+    
+    while (p != Val_emptylist){
+        head = Field(p, 0);  /* accessing the head */
+        count++;
+        p = Field(p, 1);  /* point to the tail for next loop */
+    }
+
+    if (count == 0){
+        caml_failwith("No directory paths entered");            
+    }
+    
+    const char *paths[count];
+    
+    for (int i = 0; i < count; i++){
+        head = Field(path_list, 0);  /* accessing the head */
+        paths[i] = String_val(head);
+        path_list = Field(path_list, 1);  /* point to the tail for next loop */
+    }
+
+    const char *path = paths[0];
     
     printf("watching %s for changes...\n", path);
 
