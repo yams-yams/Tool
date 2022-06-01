@@ -112,7 +112,7 @@ caml_wait_for_changes( value path_list, value closure){
         caml_failwith("No directory paths entered");            
     }
 
-    const char *path;
+    char *path;
     HANDLE hDir[count];
     int str_length;
     OVERLAPPED overlapped[count];
@@ -125,7 +125,7 @@ caml_wait_for_changes( value path_list, value closure){
         //Allocates memory for path
         str_length = strlen(String_val(head));
         path = malloc(str_length + 1);
-        path = String_val(head);
+        memcpy(path, String_val(head), str_length + 1);
 
         //Creates handle to path
         hDir[i] = CreateFile(path,
