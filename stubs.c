@@ -15,10 +15,11 @@
 struct myData {
     char *buffer;
     value closure;
-    HANDLE *hDir;
+    const char *path;
+    HANDLE hDir;
 };
 
-void LpoverlappedCompletionRoutine(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPED lpOverlapped){
+void ChangeNotification(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPED lpOverlapped){
     CAMLparam0();
     CAMLlocal2(filename, action);
     struct myData *data;
@@ -52,9 +53,7 @@ void LpoverlappedCompletionRoutine(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPE
         wchar_t *name = malloc(2 * (name_len + 1));
         memcpy(name, event->FileName, 2 * name_len);
         name[name_len] = 0;
-
         filename = caml_copy_string_of_os(name);
-
         free(name);
 
         //callback function
@@ -68,20 +67,15 @@ void LpoverlappedCompletionRoutine(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPE
         }
     }
     
-    uint8_t change_buf[1024];
-    OVERLAPPED overlapped;
-    struct myData nextData;
-    nextData.buffer = change_buf;
-    nextData.closure = data->closure;
-    nextData.hDir = data->hDir;
-    overlapped.hEvent = &nextData;
+    printf("%s\n", data->path);
+    fflush(stdout);
 
     BOOL success = ReadDirectoryChangesW(
-        data->hDir, change_buf, 1024, TRUE,
+        data->hDir, data->buffer, 1024, TRUE,
         FILE_NOTIFY_CHANGE_FILE_NAME  |
         FILE_NOTIFY_CHANGE_DIR_NAME   |
         FILE_NOTIFY_CHANGE_LAST_WRITE,
-        NULL, &overlapped, &LpoverlappedCompletionRoutine);
+        NULL, lpOverlapped, &ChangeNotification);
 
     //Does not raise exception if directory changes cannot be read
     if (success == false) {
@@ -90,14 +84,6 @@ void LpoverlappedCompletionRoutine(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPE
         win32_maperr(GetLastError());
         uerror("ReadDirectoryChangesW", Nothing);
     }
-    
-    //printf("About to sleep again\n");
-    //fflush(stdout);
-    
-    SleepEx(INFINITE, true);
-
-    //printf("Stopped sleeping again\n");
-    //fflush(stdout);
     
     CAMLreturn0;
 }
@@ -121,23 +107,18 @@ caml_wait_for_changes( value path_list, value closure){
         caml_failwith("No directory paths entered");            
     }
 
-    const char *paths[count];
+    const char *path;
+    HANDLE hDir[count];
+    int str_length;
+    OVERLAPPED overlapped[count];
+    struct myData data[count];
 
     for (int i = 0; i < count; i++){
         head = Field(path_list, 0);  /* accessing the head */
-        paths[i] = String_val(head);
-        path_list = Field(path_list, 1);  /* point to the tail for next loop */
-    }
-
-    //const char *path = paths[0];
-
-    //printf("watching %s for changes...\n", path);
-
-    HANDLE hDir;
-
-    //combine with above for loop
-    //for (int i = 0; i < count; i++){ 
-    hDir = CreateFile(paths[0],
+        str_length = strlen(String_val(head));
+        path = malloc(str_length + 1);
+        path = String_val(head);
+        hDir[i] = CreateFile(path,
             FILE_LIST_DIRECTORY,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             NULL,
@@ -145,38 +126,44 @@ caml_wait_for_changes( value path_list, value closure){
             FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
             NULL);
 
-    //Raises exception if directory cannot be opened
-    if (hDir == INVALID_HANDLE_VALUE){
-        //raise caml exception
-        caml_failwith("Directory cannot be found.");
+        //Raises exception if directory cannot be opened
+        if (hDir[i] == INVALID_HANDLE_VALUE){
+            //raise caml exception
+            caml_failwith("Directory cannot be found.");
 
+        }
+
+        uint8_t change_buf[1024];
+        data[i].buffer = change_buf;
+        data[i].closure = closure;
+        data[i].path = path;
+        data[i].hDir = hDir[i];
+        
+        overlapped[i].hEvent = &data[i];
+        
+        printf("Passing path %s\n", path);
+        fflush(stdout);
+
+        BOOL success = ReadDirectoryChangesW(
+                hDir[i], change_buf, 1024, TRUE,
+                FILE_NOTIFY_CHANGE_FILE_NAME  |
+                FILE_NOTIFY_CHANGE_DIR_NAME   |
+                FILE_NOTIFY_CHANGE_LAST_WRITE,
+                NULL, &overlapped[i], &ChangeNotification);
+
+        //Raises exception if ReadDirectoryChanges function fails
+        if (success == false) {
+            CloseHandle(hDir[i]);
+            win32_maperr(GetLastError());
+            uerror("ReadDirectoryChangesW", Nothing);
+        }
+
+        path_list = Field(path_list, 1);  /* point to the tail for next loop */
     }
 
-    uint8_t change_buf[1024];
-    OVERLAPPED overlapped;
-    struct myData data;
-    data.buffer = change_buf;
-    data.closure = closure;
-    data.hDir = hDir;
-    overlapped.hEvent = &data;
-
-    BOOL success = ReadDirectoryChangesW(
-            hDir, change_buf, 1024, TRUE,
-            FILE_NOTIFY_CHANGE_FILE_NAME  |
-            FILE_NOTIFY_CHANGE_DIR_NAME   |
-            FILE_NOTIFY_CHANGE_LAST_WRITE,
-            NULL, &overlapped, &LpoverlappedCompletionRoutine);
-
-    //Does not raise exception if directory changes cannot be read
-    if (success == false) {
-        CloseHandle(hDir);
-        //CloseHandle(overlapped.hEvent);
-
-        win32_maperr(GetLastError());
-        uerror("ReadDirectoryChangesW", Nothing);
+    while (true){
+        SleepEx(INFINITE, true);
     }
-
-    SleepEx(INFINITE, true);
 
     CAMLreturn(Val_unit);
 
