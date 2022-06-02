@@ -10,8 +10,16 @@ let handle action filename =
     | RENAMED_OLD -> Printf.printf "Renamed from: %s\n%!" filename
     | RENAMED_NEW -> Printf.printf "          to: %s\n%!" filename
 
-let () =
-    match (Array.to_list Sys.argv) with
+let func l =
+    match l with
     | [] -> Printf.printf "No directories given"
     | h::t ->
         wait_for_changes t handle
+
+let () =
+    let _handle = Thread.create func (Array.to_list Sys.argv) in
+    Printf.printf "Type anything to end directory watching\n%!";
+    while true do
+        match (input_line stdin) with
+        | _ -> Printf.printf "Exiting\n%!" ; exit 0
+    done

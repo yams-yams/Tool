@@ -8,6 +8,7 @@
 #include <caml/callback.h>
 #include <caml/osdeps.h>
 #include <caml/memory.h>
+#include <caml/threads.h>
 #include <caml/unixsupport.h>
 #include <windows.h>
 #include <assert.h>
@@ -22,6 +23,9 @@ struct myData {
 
 //Completion routine function
 void ChangeNotification(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPED lpOverlapped){
+    caml_acquire_runtime_system();
+    printf("acquired runtime system\n");
+    fflush(stdout);
     CAMLparam0();
     CAMLlocal2(filename, action);
 
@@ -61,6 +65,9 @@ void ChangeNotification(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPED lpOverlap
         name[name_len] = 0;
         filename = caml_copy_string_of_os(name);
         free(name);
+        
+        printf("At path %s\n", data->path);
+        fflush(stdout);
 
         //OCaml callback function
         caml_callback2(data->closure, action, filename);
@@ -173,6 +180,9 @@ caml_wait_for_changes( value path_list, value closure){
 
     //Program sleeps except for when completion routine is called
     while (true){
+        caml_release_runtime_system();
+        printf("released runtime system\n");
+        fflush(stdout);
         SleepEx(INFINITE, true);
     }
 
