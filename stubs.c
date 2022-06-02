@@ -21,6 +21,34 @@ struct myData {
     HANDLE hDir;
 };
 
+void terminate(ULONG_PTR arg){
+    printf("terminate called\n");
+    fflush(stdout);
+    TerminateThread(GetCurrentThread(), 0);
+
+}
+
+CAMLprim value
+caml_exit_routine(value hThread){
+    
+    CAMLparam1(hThread);
+    printf("c stub called\n");
+    fflush(stdout);
+
+    //Cast handle
+    HANDLE handle = (HANDLE) hThread;
+    
+    //Call to terminate the thread
+    QueueUserAPC(&terminate, handle, 0);
+    
+    //Close thread handle
+    CloseHandle(handle);
+
+    //Return main thread to OCaml
+    CAMLreturn(Val_unit);
+}
+
+
 //Completion routine function
 void ChangeNotification(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPED lpOverlapped){
     caml_acquire_runtime_system();
@@ -187,5 +215,4 @@ caml_wait_for_changes( value path_list, value closure){
     }
 
     CAMLreturn(Val_unit);
-
 }
