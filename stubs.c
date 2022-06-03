@@ -12,7 +12,7 @@
 #include <caml/unixsupport.h>
 #include <windows.h>
 #include <assert.h>
-
+//get windows handle, check errors in 2nd thread, add paths to existing collection 
 //Data structure of info for completion routine
 struct myData {
     char *buffer;
@@ -22,9 +22,50 @@ struct myData {
 };
 
 void terminate(ULONG_PTR arg){
+    caml_acquire_runtime_system();
     printf("terminate called\n");
     fflush(stdout);
     TerminateThread(GetCurrentThread(), 0);
+
+}
+
+CAMLprim value
+caml_get_handle(){
+    
+    CAMLparam0();
+    //get windows handle
+    HANDLE p_handle = GetCurrentThread();
+    
+    LPHANDLE handle = &p_handle;
+
+    //malloc for handle
+    
+    //duplicate p_handle
+    int success = DuplicateHandle(
+        GetCurrentProcess(),    //Current process handle
+        p_handle,               //Handle to duplicate
+        GetCurrentProcess(),    //Process that receives handle
+        handle,                 //Target handle pointer
+        THREAD_ALL_ACCESS,      //Thread access
+        TRUE,                   //Thread is inheritable
+        0);
+    
+    //check if handle copy is successful
+    if (success == 0){
+        win32_maperr(GetLastError());
+        uerror("Thread handle could not be duplicated.", Nothing);
+    }
+   
+    //cast to int
+    printf("%ld\n", handle);
+    fflush(stdout);
+
+    //HANDLE handle_int = *handle;
+    //change last bit
+    //handle_int++;
+    
+    //return as ocaml int
+    return caml_copy_nativeint((intnat) (handle));
 
 }
 
@@ -34,13 +75,38 @@ caml_exit_routine(value hThread){
     CAMLparam1(hThread);
     printf("c stub called\n");
     fflush(stdout);
-
-    //Cast handle
-    HANDLE handle = (HANDLE) hThread;
+    
+    //Cast handle ?
+    LPHANDLE handle = (LPHANDLE)(Nativeint_val(hThread));
+    printf("%ld\n", handle);
     
     //Call to terminate the thread
-    QueueUserAPC(&terminate, handle, 0);
+    //Check success
+    DWORD success = QueueUserAPC(&terminate, *handle, 0);
     
+    if (success == 0) {
+        LPTSTR lpMsgBuf;
+        DWORD dw = GetLastError();
+
+        FormatMessage(
+            FORMAT_MESSAGE_ALLOCATE_BUFFER |
+            FORMAT_MESSAGE_FROM_SYSTEM |
+            FORMAT_MESSAGE_IGNORE_INSERTS,
+            NULL,
+            dw,
+            MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+            (LPSTR)&lpMsgBuf,
+            0, NULL );
+        CloseHandle(*handle);
+        printf("%s\n", lpMsgBuf);
+
+        win32_maperr(GetLastError());
+        uerror("QueueUserAPC failed.", Nothing);
+    }
+    
+    printf("QueueUserAPC called\n");
+    fflush(stdout);
+
     //Close thread handle
     CloseHandle(handle);
 

@@ -1,10 +1,13 @@
 type action = ADD | REMOVE | MODIFY | RENAMED_OLD | RENAMED_NEW
+type t
 
 external wait_for_changes: string list (* directory names *) -> (action -> string -> unit) -> unit = "caml_wait_for_changes"
 
-external exit_routine: Thread.t -> unit = "caml_exit_routine"
+external exit_routine: t -> unit = "caml_exit_routine"
 
-let handle action filename = 
+external get_handle: unit -> t = "caml_get_handle" (* get windows handle, change last bit to 1 and send back as ocaml int *)
+
+let handle_notif action filename = 
     match action with
     | ADD -> Printf.printf "Added: %s\n%!" filename
     | REMOVE -> Printf.printf "Removed: %s\n%!" filename
@@ -12,15 +15,21 @@ let handle action filename =
     | RENAMED_OLD -> Printf.printf "Renamed from: %s\n%!" filename
     | RENAMED_NEW -> Printf.printf "          to: %s\n%!" filename
 
-let func l =
-    match l with
+let handle = ref None
+
+let func () =
+    handle := Some(get_handle ());
+    match Array.to_list Sys.argv  with
     | [] -> Printf.printf "No directories given"
     | h::t ->
-        wait_for_changes t handle
+        wait_for_changes t handle_notif
 
 let () =
-    let handle = Thread.create func (Array.to_list Sys.argv) in
+    let ocaml_handle = Thread.create func () in
     Printf.printf "Type anything to end directory watching\n%!";
-    match (input_line stdin) with
-    | _ -> Printf.printf "Exiting\n%!" ; exit_routine handle;
-
+    match input_line stdin with
+    | _ -> Printf.printf "Exiting\n%!";
+    match !handle with
+    | Some handle -> exit_routine handle;
+    | _ -> Printf.printf "Handle not ready\n%!";
+    Thread.join ocaml_handle;
