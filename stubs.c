@@ -8,11 +8,15 @@
 #include <caml/callback.h>
 #include <caml/osdeps.h>
 #include <caml/memory.h>
+#include <caml/threads.h>
 #include <caml/unixsupport.h>
 #include <windows.h>
 #include <assert.h>
-
+//get windows handle, check errors in 2nd thread, add paths to existing collection 
 //Data structure of info for completion routine
+
+bool term_flag = false;
+
 struct myData {
     char *buffer;
     value closure;
@@ -20,8 +24,96 @@ struct myData {
     HANDLE hDir;
 };
 
+void terminate(ULONG_PTR arg){
+    caml_acquire_runtime_system();
+    printf("terminate called\n");
+    fflush(stdout);
+    
+    //sets flag that ends file-watching
+    term_flag = true;
+    
+    caml_release_runtime_system();
+}
+
+CAMLprim value
+caml_get_handle(){
+    
+    CAMLparam0();
+    //get windows handle
+    HANDLE p_handle = GetCurrentThread();
+    
+    LPHANDLE handle = &p_handle;
+
+    //malloc for handle
+    
+    //duplicate p_handle
+    int success = DuplicateHandle(
+        GetCurrentProcess(),    //Current process handle
+        p_handle,               //Handle to duplicate
+        GetCurrentProcess(),    //Process that receives handle
+        handle,                 //Target handle pointer
+        THREAD_ALL_ACCESS,      //Thread access
+        TRUE,                   //Thread is inheritable
+        0);
+    
+    //check if handle copy is successful
+    if (success == 0){
+        win32_maperr(GetLastError());
+        uerror("Thread handle could not be duplicated.", Nothing);
+    }
+   
+    //return as ocaml int
+    CAMLreturn(caml_copy_nativeint((intnat)(*handle)));
+
+}
+
+CAMLprim value
+caml_exit_routine(value hThread){
+    
+    CAMLparam1(hThread);
+    printf("exit routine called\n");
+    fflush(stdout);
+    
+    //Cast native int to handle
+    HANDLE handle = (HANDLE)(Nativeint_val(hThread));
+    
+    //Call to terminate the thread
+    DWORD success = QueueUserAPC(&terminate, handle, 0);
+    
+    //Check success
+    if (success == 0) {
+        LPTSTR lpMsgBuf;
+        DWORD dw = GetLastError();
+
+        FormatMessage(
+            FORMAT_MESSAGE_ALLOCATE_BUFFER |
+            FORMAT_MESSAGE_FROM_SYSTEM |
+            FORMAT_MESSAGE_IGNORE_INSERTS,
+            NULL,
+            dw,
+            MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+            (LPSTR)&lpMsgBuf,
+            0, NULL );
+        CloseHandle(handle);
+        printf("%s\n", lpMsgBuf);
+
+        win32_maperr(GetLastError());
+        uerror("QueueUserAPC failed.", Nothing);
+    }
+    
+    printf("QueueUserAPC called\n");
+    fflush(stdout);
+    
+    //Return main thread to OCaml
+    CAMLreturn(Val_unit);
+}
+
+
 //Completion routine function
 void ChangeNotification(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPED lpOverlapped){
+    caml_acquire_runtime_system();
+    printf("acquired runtime system\n");
+    fflush(stdout);
     CAMLparam0();
     CAMLlocal2(filename, action);
 
@@ -61,6 +153,9 @@ void ChangeNotification(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPED lpOverlap
         name[name_len] = 0;
         filename = caml_copy_string_of_os(name);
         free(name);
+        
+        printf("At path %s\n", data->path);
+        fflush(stdout);
 
         //OCaml callback function
         caml_callback2(data->closure, action, filename);
@@ -87,7 +182,10 @@ void ChangeNotification(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPED lpOverlap
         win32_maperr(GetLastError());
         uerror("ReadDirectoryChangesW", Nothing);
     }
-    
+    caml_release_runtime_system();
+    printf("released runtime system\n");
+    fflush(stdout);
+
     CAMLreturn0;
 }
 
@@ -170,12 +268,17 @@ caml_wait_for_changes( value path_list, value closure){
 
         path_list = Field(path_list, 1);  /* point to the tail for next loop */
     }
+    
+    caml_release_runtime_system();
+    printf("released runtime system\n");
+    fflush(stdout);
 
     //Program sleeps except for when completion routine is called
-    while (true){
+    while (!term_flag){
         SleepEx(INFINITE, true);
     }
 
-    CAMLreturn(Val_unit);
+    caml_acquire_runtime_system();
 
+    CAMLreturn(Val_unit);
 }
