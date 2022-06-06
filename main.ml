@@ -28,8 +28,11 @@ let () =
     let ocaml_handle = Thread.create func () in
     Printf.printf "Type anything to end directory watching\n%!";
     match input_line stdin with
-    | _ -> Printf.printf "Exiting\n%!";
-    match !handle with
-    | Some handle -> exit_routine handle;
-    | _ -> Printf.printf "Handle not ready\n%!";
+    | _ ->
+        (Printf.printf "Exiting\n%!";
+        match !handle with
+        | Some handle -> exit_routine handle
+        | _ -> Printf.printf "Handle not ready\n%!");
     Thread.join ocaml_handle;
+    match input_line stdin with
+    | _ -> Printf.printf "Second thread killed, main thread running again\n%!"

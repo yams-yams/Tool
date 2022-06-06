@@ -25,7 +25,11 @@ void terminate(ULONG_PTR arg){
     caml_acquire_runtime_system();
     printf("terminate called\n");
     fflush(stdout);
-    TerminateThread(GetCurrentThread(), 0);
+    bool success = TerminateThread(GetCurrentThread(), 0);
+    if (!success) {
+        printf("Thread not terminated\n");
+        fflush(stdout);
+    }
 
 }
 
@@ -56,16 +60,8 @@ caml_get_handle(){
         uerror("Thread handle could not be duplicated.", Nothing);
     }
    
-    //cast to int
-    printf("%ld\n", handle);
-    fflush(stdout);
-
-    //HANDLE handle_int = *handle;
-    //change last bit
-    //handle_int++;
-    
     //return as ocaml int
-    return caml_copy_nativeint((intnat) (handle));
+    CAMLreturn(caml_copy_nativeint((intnat)(*handle)));
 
 }
 
@@ -73,17 +69,16 @@ CAMLprim value
 caml_exit_routine(value hThread){
     
     CAMLparam1(hThread);
-    printf("c stub called\n");
+    printf("exit routine called\n");
     fflush(stdout);
     
-    //Cast handle ?
-    LPHANDLE handle = (LPHANDLE)(Nativeint_val(hThread));
-    printf("%ld\n", handle);
+    //Cast native int to handle
+    HANDLE handle = (HANDLE)(Nativeint_val(hThread));
     
     //Call to terminate the thread
-    //Check success
-    DWORD success = QueueUserAPC(&terminate, *handle, 0);
+    DWORD success = QueueUserAPC(&terminate, handle, 0);
     
+    //Check success
     if (success == 0) {
         LPTSTR lpMsgBuf;
         DWORD dw = GetLastError();
@@ -97,7 +92,7 @@ caml_exit_routine(value hThread){
             MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
             (LPSTR)&lpMsgBuf,
             0, NULL );
-        CloseHandle(*handle);
+        CloseHandle(handle);
         printf("%s\n", lpMsgBuf);
 
         win32_maperr(GetLastError());
@@ -106,10 +101,7 @@ caml_exit_routine(value hThread){
     
     printf("QueueUserAPC called\n");
     fflush(stdout);
-
-    //Close thread handle
-    CloseHandle(handle);
-
+    
     //Return main thread to OCaml
     CAMLreturn(Val_unit);
 }
