@@ -14,6 +14,9 @@
 #include <assert.h>
 //get windows handle, check errors in 2nd thread, add paths to existing collection 
 //Data structure of info for completion routine
+
+bool term_flag = false;
+
 struct myData {
     char *buffer;
     value closure;
@@ -25,12 +28,11 @@ void terminate(ULONG_PTR arg){
     caml_acquire_runtime_system();
     printf("terminate called\n");
     fflush(stdout);
-    bool success = TerminateThread(GetCurrentThread(), 0);
-    if (!success) {
-        printf("Thread not terminated\n");
-        fflush(stdout);
-    }
-
+    
+    //sets flag that ends file-watching
+    term_flag = true;
+    
+    caml_release_runtime_system();
 }
 
 CAMLprim value
@@ -180,7 +182,10 @@ void ChangeNotification(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPED lpOverlap
         win32_maperr(GetLastError());
         uerror("ReadDirectoryChangesW", Nothing);
     }
-    
+    caml_release_runtime_system();
+    printf("released runtime system\n");
+    fflush(stdout);
+
     CAMLreturn0;
 }
 
@@ -263,14 +268,17 @@ caml_wait_for_changes( value path_list, value closure){
 
         path_list = Field(path_list, 1);  /* point to the tail for next loop */
     }
+    
+    caml_release_runtime_system();
+    printf("released runtime system\n");
+    fflush(stdout);
 
     //Program sleeps except for when completion routine is called
-    while (true){
-        caml_release_runtime_system();
-        printf("released runtime system\n");
-        fflush(stdout);
+    while (!term_flag){
         SleepEx(INFINITE, true);
     }
+
+    caml_acquire_runtime_system();
 
     CAMLreturn(Val_unit);
 }

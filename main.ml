@@ -35,4 +35,4 @@ let () =
         | _ -> Printf.printf "Handle not ready\n%!");
     Thread.join ocaml_handle;
     match input_line stdin with
-    | _ -> Printf.printf "Second thread killed, main thread running again\n%!"
+    | _ -> Printf.printf "Second thread killed, main thread will exit now\n%!"
