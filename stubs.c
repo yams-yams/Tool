@@ -12,22 +12,29 @@
 #include <caml/unixsupport.h>
 #include <windows.h>
 #include <assert.h>
-//get windows handle, check errors in 2nd thread, add paths to existing collection 
-//Data structure of info for completion routine
+#include <intsafe.h>
 
+//global values
 bool term_flag = false;
+struct path_node *headNode;
+value closure;
 
+//structs for data storage
 struct myData {
     char *buffer;
-    value closure;
     const char *path;
     HANDLE hDir;
 };
 
+struct path_node {
+    
+    struct myData data;
+    OVERLAPPED overlapped;
+    struct path_node *next;
+};
+
 void terminate(ULONG_PTR arg){
     caml_acquire_runtime_system();
-    printf("terminate called\n");
-    fflush(stdout);
     
     //sets flag that ends file-watching
     term_flag = true;
@@ -71,8 +78,6 @@ CAMLprim value
 caml_exit_routine(value hThread){
     
     CAMLparam1(hThread);
-    printf("exit routine called\n");
-    fflush(stdout);
     
     //Cast native int to handle
     HANDLE handle = (HANDLE)(Nativeint_val(hThread));
@@ -101,9 +106,6 @@ caml_exit_routine(value hThread){
         uerror("QueueUserAPC failed.", Nothing);
     }
     
-    printf("QueueUserAPC called\n");
-    fflush(stdout);
-    
     //Return main thread to OCaml
     CAMLreturn(Val_unit);
 }
@@ -112,18 +114,17 @@ caml_exit_routine(value hThread){
 //Completion routine function
 void ChangeNotification(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPED lpOverlapped){
     caml_acquire_runtime_system();
-    printf("acquired runtime system\n");
-    fflush(stdout);
+    
     CAMLparam0();
     CAMLlocal2(filename, action);
-
+    
     struct myData *data;
     data = (struct myData*)lpOverlapped->hEvent;
     FILE_NOTIFY_INFORMATION *event = (FILE_NOTIFY_INFORMATION*)data->buffer;
     
     //Iterates over event notifications 
     for (;;) {
-
+        
         DWORD name_len = event->FileNameLength / sizeof(wchar_t);
 
         //Assigns OCaml variable action
@@ -158,7 +159,8 @@ void ChangeNotification(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPED lpOverlap
         fflush(stdout);
 
         //OCaml callback function
-        caml_callback2(data->closure, action, filename);
+        caml_callback2(closure, action, filename);
+        
 
         //Traverse to next event entry
         if (event->NextEntryOffset) {
@@ -180,98 +182,120 @@ void ChangeNotification(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPED lpOverlap
     if (success == false) {
         CloseHandle(data->hDir);
         win32_maperr(GetLastError());
-        uerror("ReadDirectoryChangesW", Nothing);
+        uerror("ReadDirectoryChangesW failed", Nothing);
     }
+
     caml_release_runtime_system();
-    printf("released runtime system\n");
-    fflush(stdout);
 
     CAMLreturn0;
 }
 
-CAMLprim value
-caml_wait_for_changes( value path_list, value closure){
+void watch_path( ULONG_PTR lPath ) {
 
-    CAMLparam2(path_list, closure);    
-    CAMLlocal2(p, head);
+    caml_acquire_runtime_system();
 
-    int count = 0;
-    p = path_list;    
-
-    //Gets number of paths using pointer p
-    while (p != Val_emptylist){
-        head = Field(p, 0);  /* accessing the head */
-        count++;
-        p = Field(p, 1);  /* point to the tail for next loop */
-    }
-
-    //Raises exception if no paths are passed
-    if (count == 0){
-        caml_failwith("No directory paths entered");            
-    }
-
-    char *path;
-    HANDLE hDir[count];
-    int str_length;
-    OVERLAPPED overlapped[count];
-    struct myData data[count];
+    struct path_node *currentNode;
     
-    //Calls ReadDirectoryChanges for each path
-    for (int i = 0; i < count; i++){
-        head = Field(path_list, 0);  /* accessing the head */
-        
-        //Allocates memory for path
-        str_length = strlen(String_val(head));
-        path = malloc(str_length + 1);
-        memcpy(path, String_val(head), str_length + 1);
+    currentNode = (struct path_node*) malloc(sizeof(struct path_node));
+     
+    uint8_t change_buf[1024];
+    currentNode->data.buffer = change_buf;
+    //currentNode->data.closure = closure;
+    currentNode->data.path = (char*) lPath;
+    
+    //Creates handle to path
+    currentNode->data.hDir = CreateFile(currentNode->data.path,
+        FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+        NULL);
 
-        //Creates handle to path
-        hDir[i] = CreateFile(path,
-            FILE_LIST_DIRECTORY,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            NULL,
-            OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
-            NULL);
+    //Raises exception if directory cannot be opened
+    if (currentNode->data.hDir == INVALID_HANDLE_VALUE){
+        //raise caml exception
+        caml_failwith("Directory cannot be found.");
 
-        //Raises exception if directory cannot be opened
-        if (hDir[i] == INVALID_HANDLE_VALUE){
-            //raise caml exception
-            caml_failwith("Directory cannot be found.");
+    }
+       currentNode->overlapped.hEvent = &(currentNode->data);
+    
+    BOOL success = ReadDirectoryChangesW(
+        currentNode->data.hDir, currentNode->data.buffer, 1024, TRUE,
+        FILE_NOTIFY_CHANGE_FILE_NAME  |
+        FILE_NOTIFY_CHANGE_DIR_NAME   |
+        FILE_NOTIFY_CHANGE_LAST_WRITE,
+        NULL, &(currentNode->overlapped), &ChangeNotification);
 
-        }
-        
-        uint8_t change_buf[1024];
-        data[i].buffer = change_buf;
-        data[i].closure = closure;
-        data[i].path = path;
-        data[i].hDir = hDir[i];
-        
-        overlapped[i].hEvent = &data[i];
-        
-        BOOL success = ReadDirectoryChangesW(
-            hDir[i], change_buf, 1024, TRUE,
-            FILE_NOTIFY_CHANGE_FILE_NAME  |
-            FILE_NOTIFY_CHANGE_DIR_NAME   |
-            FILE_NOTIFY_CHANGE_LAST_WRITE,
-            NULL, &overlapped[i], &ChangeNotification);
-
-        //Raises exception if ReadDirectoryChanges function fails
-        if (success == false) {
-            CloseHandle(hDir[i]);
-            win32_maperr(GetLastError());
-            uerror("ReadDirectoryChangesW", Nothing);
-        }
-        
-        printf("Watching %s\n", path);
-        fflush(stdout);
-
-        path_list = Field(path_list, 1);  /* point to the tail for next loop */
+    //Raises exception if ReadDirectoryChanges function fails
+    if (success == false) {
+        CloseHandle(currentNode->data.hDir);
+        win32_maperr(GetLastError());
+        uerror("ReadDirectoryChangesW failed", Nothing);
     }
     
-    caml_release_runtime_system();
-    printf("released runtime system\n");
+    printf("Watching %s\n", currentNode->data.path);
     fflush(stdout);
+    
+    currentNode->next = headNode;
+    headNode = currentNode;
+
+    caml_release_runtime_system();
+}
+
+CAMLprim value
+caml_add_path( value hThread, value ocaml_path ) {
+    
+    CAMLparam2(ocaml_path, hThread);
+    
+    //Allocates memory for path
+    int str_length = strlen(String_val(ocaml_path));
+    char *path = malloc(str_length + 1);
+    memcpy(path, String_val(ocaml_path), str_length + 1);
+   
+    //Cast native int to handle
+    HANDLE handle = (HANDLE)(Nativeint_val(hThread));
+    
+    ULONG_PTR ptr = (ULONG_PTR)path;
+
+    //Call to terminate the thread
+    DWORD success = QueueUserAPC(&watch_path, handle, ptr);
+    
+    //Check success
+    if (success == 0) {
+        LPTSTR lpMsgBuf;
+        DWORD dw = GetLastError();
+
+        FormatMessage(
+            FORMAT_MESSAGE_ALLOCATE_BUFFER |
+            FORMAT_MESSAGE_FROM_SYSTEM |
+            FORMAT_MESSAGE_IGNORE_INSERTS,
+            NULL,
+            dw,
+            MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+            (LPSTR)&lpMsgBuf,
+            0, NULL );
+        CloseHandle(handle);
+        printf("%s\n", lpMsgBuf);
+
+        win32_maperr(GetLastError());
+        uerror("QueueUserAPC failed.", Nothing);
+    }
+    
+    //Return main thread to OCaml
+    CAMLreturn(Val_unit);
+
+}
+
+
+CAMLprim value
+caml_wait_for_changes( value closure_f ) {
+
+    CAMLparam1(closure_f);    
+    
+    closure = closure_f;
+   
+    caml_release_runtime_system();
 
     //Program sleeps except for when completion routine is called
     while (!term_flag){
@@ -279,6 +303,16 @@ caml_wait_for_changes( value path_list, value closure){
     }
 
     caml_acquire_runtime_system();
+    
+    struct path_node* tmp;
+
+    while (headNode != NULL) {
+       tmp = headNode;
+       headNode = headNode->next;
+       printf("Deleting node for %s\n", tmp->data.path);
+       fflush(stdout);
+       free(tmp);
+    }
 
     CAMLreturn(Val_unit);
 }

@@ -1,11 +1,13 @@
 type action = ADD | REMOVE | MODIFY | RENAMED_OLD | RENAMED_NEW
 type t
 
-external wait_for_changes: string list (* directory names *) -> (action -> string -> unit) -> unit = "caml_wait_for_changes"
+external wait_for_changes: (action -> string -> unit) -> unit = "caml_wait_for_changes"
 
 external exit_routine: t -> unit = "caml_exit_routine"
 
-external get_handle: unit -> t = "caml_get_handle" (* get windows handle, change last bit to 1 and send back as ocaml int *)
+external get_handle: unit -> t = "caml_get_handle" 
+
+external add_path: t -> string -> unit = "caml_add_path"
 
 let handle_notif action filename = 
     match action with
@@ -19,20 +21,32 @@ let handle = ref None
 
 let func () =
     handle := Some(get_handle ());
-    match Array.to_list Sys.argv  with
-    | [] -> Printf.printf "No directories given"
-    | h::t ->
-        wait_for_changes t handle_notif
+    wait_for_changes handle_notif
+
+let initial_paths handle = 
+    match Array.to_list Sys.argv with
+        | [] -> Printf.printf "No directories given\n%!"
+        | h::t -> List.iter (add_path handle) t
+
+let rec get_second_handle () =
+    match !handle with 
+    | Some handle -> handle
+    | _ -> get_second_handle ()
+
 
 let () =
     let ocaml_handle = Thread.create func () in
-    Printf.printf "Type anything to end directory watching\n%!";
-    match input_line stdin with
-    | _ ->
-        (Printf.printf "Exiting\n%!";
-        match !handle with
-        | Some handle -> exit_routine handle
-        | _ -> Printf.printf "Handle not ready\n%!");
-    Thread.join ocaml_handle;
-    match input_line stdin with
-    | _ -> Printf.printf "Second thread killed, main thread will exit now\n%!"
+    initial_paths (get_second_handle ());
+    Printf.printf "Type another path to watch or 'exit' to end directory watching\n%!";
+    let flag = ref true in
+    while !flag do
+        match input_line stdin with
+        | "exit" ->
+            (Printf.printf "Exiting\n%!";
+            exit_routine (get_second_handle ());
+            Thread.join ocaml_handle;
+            Printf.printf "Second thread killed, main thread will exit now\n%!";
+            flag := false);
+        | _ as path -> add_path (get_second_handle ()) path;
+    done;
+
