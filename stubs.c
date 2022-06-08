@@ -198,9 +198,8 @@ void watch_path( ULONG_PTR lPath ) {
     
     currentNode = (struct path_node*) malloc(sizeof(struct path_node));
      
-    uint8_t change_buf[1024];
+    uint8_t *change_buf = (uint8_t*) malloc(1024 * sizeof(uint8_t));
     currentNode->data.buffer = change_buf;
-    //currentNode->data.closure = closure;
     currentNode->data.path = (char*) lPath;
     
     //Creates handle to path
@@ -309,8 +308,6 @@ caml_wait_for_changes( value closure_f ) {
     while (headNode != NULL) {
        tmp = headNode;
        headNode = headNode->next;
-       printf("Deleting node for %s\n", tmp->data.path);
-       fflush(stdout);
        free(tmp);
     }
 

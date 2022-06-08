@@ -42,10 +42,10 @@ let () =
     while !flag do
         match input_line stdin with
         | "exit" ->
-            (Printf.printf "Exiting\n%!";
+            (Printf.printf "Terminating file-watching\n%!";
             exit_routine (get_second_handle ());
             Thread.join ocaml_handle;
-            Printf.printf "Second thread killed, main thread will exit now\n%!";
+            Printf.printf "File-watching has ended, main thread will exit now\n%!";
             flag := false);
         | _ as path -> add_path (get_second_handle ()) path;
     done;
