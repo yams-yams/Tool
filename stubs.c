@@ -34,8 +34,7 @@ struct path_node {
 };
 
 void terminate(ULONG_PTR arg){
-    caml_acquire_runtime_system();
-    
+    caml_acquire_runtime_system();    
     //sets flag that ends file-watching
     term_flag = true;
     
@@ -77,8 +76,7 @@ caml_get_handle(){
 CAMLprim value
 caml_exit_routine(value hThread){
     
-    CAMLparam1(hThread);
-    
+    CAMLparam1(hThread);    
     //Cast native int to handle
     HANDLE handle = (HANDLE)(Nativeint_val(hThread));
     
@@ -105,7 +103,7 @@ caml_exit_routine(value hThread){
         win32_maperr(GetLastError());
         uerror("QueueUserAPC failed.", Nothing);
     }
-    
+
     //Return main thread to OCaml
     CAMLreturn(Val_unit);
 }
@@ -114,7 +112,6 @@ caml_exit_routine(value hThread){
 //Completion routine function
 void ChangeNotification(DWORD dwErrorCode, DWORD dwBytes, LPOVERLAPPED lpOverlapped){
     caml_acquire_runtime_system();
-    
     CAMLparam0();
     CAMLlocal2(filename, action);
     
@@ -302,7 +299,7 @@ caml_wait_for_changes( value closure_f ) {
     }
 
     caml_acquire_runtime_system();
-    
+
     struct path_node* tmp;
 
     while (headNode != NULL) {
@@ -310,6 +307,6 @@ caml_wait_for_changes( value closure_f ) {
        headNode = headNode->next;
        free(tmp);
     }
-
+    
     CAMLreturn(Val_unit);
 }

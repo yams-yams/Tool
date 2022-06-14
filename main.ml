@@ -9,6 +9,7 @@ external get_handle: unit -> t = "caml_get_handle"
 
 external add_path: t -> string -> unit = "caml_add_path"
 
+
 let handle_notif action filename = 
     match action with
     | ADD -> Printf.printf "Added: %s\n%!" filename
@@ -49,4 +50,3 @@ let () =
             flag := false);
         | _ as path -> add_path (get_second_handle ()) path;
     done;
-
