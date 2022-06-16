@@ -239,7 +239,7 @@ caml_block_for_changes(value v_state, value v_closure)
                     //Traverse to next event entry
                     if (event->NextEntryOffset) 
                     {
-                        *((uint8_t**)&event) += event->NextEntryOffset;
+                        *((char**)&event) += event->NextEntryOffset;
                     } 
                     else 
                     {
@@ -272,13 +272,13 @@ caml_block_for_changes(value v_state, value v_closure)
             {
                 //Creates handle to path
                 struct path_node *new_node = NULL;
-                uint8_t *change_buf = NULL;
+                char *change_buf = NULL;
                 struct request* changeRequest = NULL;
                 ULONG_PTR completion_key;
 
                 new_node = (struct path_node*) malloc(sizeof(struct path_node));
                 //**could be char ?
-                change_buf = (uint8_t*) malloc(BUFF_SIZE * sizeof(uint8_t));
+                change_buf = (char*) malloc(BUFF_SIZE * sizeof(char));
                 new_node->buffer = change_buf;
                 new_node->path = notif->path;
 
