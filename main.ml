@@ -1,13 +1,13 @@
 type action = ADD | REMOVE | MODIFY | RENAMED_OLD | RENAMED_NEW
 type t
 
-external open_port: unit -> int = "caml_open_port"
+external open_port: unit -> t = "winwatch_open_port"
 
-external add_path: int -> string -> unit = "caml_add_path"
+external add_path: t -> string -> unit = "winwatch_add_path"
 
-external block_for_changes: int -> (action -> string -> unit)  -> unit = "caml_block_for_changes" 
+external block_for_changes: t -> (action -> string -> unit)  -> unit = "winwatch_block_for_changes" 
 
-external stop_watching: int -> unit = "caml_stop_watching"
+external stop_watching: t -> unit = "winwatch_stop_watching"
 
 let handle_notif action filename = 
     match action with
