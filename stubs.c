@@ -22,7 +22,6 @@ struct global_state
     value closure;
 };
 
-//node structure for allocated values
 struct path_node 
 {    
     char *buffer;
@@ -39,7 +38,6 @@ enum request_type
     AddPath
 };
 
-//request data structure
 struct request 
 {
     enum request_type type;
@@ -50,7 +48,7 @@ struct request
     };
 };
 
-DWORD print_error(HANDLE handle)
+static DWORD print_error(HANDLE handle)
 {
     LPTSTR lpMsgBuf;
     DWORD dw;
@@ -76,32 +74,28 @@ DWORD print_error(HANDLE handle)
 }
 
 
-value
-caml_open_port() 
+value winwatch_open_port(value v_unit) 
 {
-    CAMLparam0();    
+    CAMLparam1(v_unit);    
     struct global_state *state = NULL;
 
-    //Initialize global state
-    state = (struct global_state*) malloc(sizeof(struct global_state));
-    state->head = (struct path_node*) malloc(sizeof(struct path_node));
+    state = malloc(sizeof(struct global_state));
+    state->head = malloc(sizeof(struct path_node));
     state->head->handle = INVALID_HANDLE_VALUE;
     state->head->next = NULL;
 
-    //Creates a completion port without associating it to a handle
+    /*Creates a completion port without associating it to a handle*/
     state->completion_port = CreateIoCompletionPort(
-        INVALID_HANDLE_VALUE,   //Handle to watch
-        NULL,                   //Existing Port
-        0,                      //Completion Key
-        1);                     //Num of threads used for IOC
+        INVALID_HANDLE_VALUE,   
+        NULL,                  
+        0,                    
+        1);                  
 
-    //Return integer value of pointer to state
+    /*Return integer value of pointer to state*/
     CAMLreturn(caml_copy_nativeint((intnat)(state)));
 }
 
-/*Use v_ for values, initialize pointers to zero, move declarations to top of function, braces*/
-value
-caml_add_path(value v_state, value v_path) 
+value winwatch_add_path(value v_state, value v_path) 
 {
     CAMLparam2(v_state, v_path);
     int str_length;
@@ -112,15 +106,13 @@ caml_add_path(value v_state, value v_path)
     ULONG_PTR completion_key;
     OVERLAPPED *overlapped = NULL;
 
-    //Allocates memory for path
     str_length = strlen(String_val(v_path));
     path = malloc(str_length + 1);
     memcpy(path, String_val(v_path), str_length + 1);
     
     
-    //casts pointer to state
     state = (struct global_state*)(Nativeint_val(v_state)); 
-    add_request = (struct request*)(malloc(sizeof(struct request)));
+    add_request = malloc(sizeof(struct request));
     
     add_request->type = AddPath;
     add_request->path = path;
@@ -141,9 +133,7 @@ caml_add_path(value v_state, value v_path)
     CAMLreturn(Val_unit);
 }
 
-/*rename caml_ */
-value
-caml_block_for_changes(value v_state, value v_closure) 
+value winwatch_block_for_changes(value v_state, value v_closure) 
 {
     CAMLparam2(v_state, v_closure);
     CAMLlocal2(filename, action);
@@ -155,6 +145,7 @@ caml_block_for_changes(value v_state, value v_closure)
     BOOL stop;
     char* path;
     struct request* notif = NULL;
+    struct path_node* tmp = NULL;
 
     state = (struct global_state*)(Nativeint_val(v_state));
     state->closure = v_closure;
@@ -166,12 +157,15 @@ caml_block_for_changes(value v_state, value v_closure)
     while (!stop) 
     {
         caml_release_runtime_system();
+        
+        /*Blocks until completion port receives a packet*/
         BOOL success = GetQueuedCompletionStatus(
-            state->completion_port,         //handle to completion port
-            &num_bytes,         //bytes transferred
-            &completion_key,    //completion key
-            &overlapped,        //overlapped data structure
-            INFINITE);          //seconds to time out
+            state->completion_port,         
+            &num_bytes,         
+            &completion_key,    
+            &overlapped,        
+            INFINITE);
+
         caml_acquire_runtime_system();
 
         if (success == FALSE)
@@ -197,12 +191,11 @@ caml_block_for_changes(value v_state, value v_closure)
                 data = notif->file_change;
                 event = (FILE_NOTIFY_INFORMATION*)data->buffer;
                 
-                //Iterates over event notifications 
+                /*Iterates over file change notifications*/
                 for (;;) 
                 {
                     DWORD name_len = event->FileNameLength / sizeof(wchar_t);
 
-                    //Assigns OCaml variable action
                     switch (event->Action)
                     {
                         case FILE_ACTION_ADDED: 
@@ -222,7 +215,6 @@ caml_block_for_changes(value v_state, value v_closure)
                             break;
                     }
 
-                    //Assigns OCaml variable filename 
                     wchar_t *name = malloc(2 * (name_len + 1));
                     memcpy(name, event->FileName, 2 * name_len);
                     name[name_len] = 0;
@@ -232,11 +224,9 @@ caml_block_for_changes(value v_state, value v_closure)
                     printf("At path %s\n", data->path);
                     fflush(stdout);
 
-                    //OCaml callback function
+                    /*Calls OCaml function that prints notification */
                     caml_callback2(state->closure, action, filename);
                     
-
-                    //Traverse to next event entry
                     if (event->NextEntryOffset) 
                     {
                         *((char**)&event) += event->NextEntryOffset;
@@ -248,10 +238,8 @@ caml_block_for_changes(value v_state, value v_closure)
                 
                 }
                 
-                //use memset instead
-                notif->file_change->overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+                memset(&(notif->file_change->overlapped), 0, sizeof(OVERLAPPED));
                 
-                //Read directory changes without completion routine
                 BOOL success = ReadDirectoryChangesW(
                     notif->file_change->handle, notif->file_change->buffer, BUFF_SIZE, TRUE,
                     FILE_NOTIFY_CHANGE_FILE_NAME  |
@@ -259,7 +247,6 @@ caml_block_for_changes(value v_state, value v_closure)
                     FILE_NOTIFY_CHANGE_LAST_WRITE,
                     NULL, &(notif->file_change->overlapped), NULL);
                 
-                //Raises exception if ReadDirectoryChanges function fails
                 if (success == FALSE) 
                 {
                     DWORD dw = print_error(notif->file_change->handle);
@@ -270,15 +257,13 @@ caml_block_for_changes(value v_state, value v_closure)
             
             case AddPath:
             {
-                //Creates handle to path
                 struct path_node *new_node = NULL;
                 char *change_buf = NULL;
                 struct request* changeRequest = NULL;
                 ULONG_PTR completion_key;
 
-                new_node = (struct path_node*) malloc(sizeof(struct path_node));
-                //**could be char ?
-                change_buf = (char*) malloc(BUFF_SIZE * sizeof(char));
+                new_node = malloc(sizeof(struct path_node));
+                change_buf = malloc(BUFF_SIZE * sizeof(char));
                 new_node->buffer = change_buf;
                 new_node->path = notif->path;
 
@@ -290,33 +275,30 @@ caml_block_for_changes(value v_state, value v_closure)
                     FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
                     NULL);
 
-                //Raises exception if directory cannot be opened
                 if (new_node->handle == INVALID_HANDLE_VALUE)
                 {
                     caml_failwith("Directory cannot be found.");
                 }
                 
-                //**use data->overlapped, use memset
-                new_node->overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+                memset(&(new_node->overlapped), 0, sizeof(OVERLAPPED));
                 
-                changeRequest = (struct request*) malloc(sizeof(struct request));
+                changeRequest = malloc(sizeof(struct request));
                 changeRequest->type = FileChange;
                 changeRequest->file_change = new_node;
+                
                 completion_key = (ULONG_PTR) changeRequest; 
 
-                //Adds handle to Completion Port
                 state->completion_port = CreateIoCompletionPort(
                     new_node->handle,
                     state->completion_port,
-                    completion_key,         //pass request object
-                    1);                     //ignored because port already exists
+                    completion_key,         
+                    1);                     
 
                 if (state->completion_port == NULL) 
                 {
                     caml_failwith("File could not be added to completion port.");
                 }
                    
-                //Read directory changes without completion routine
                 BOOL success = ReadDirectoryChangesW(
                     new_node->handle, new_node->buffer, BUFF_SIZE, TRUE,
                     FILE_NOTIFY_CHANGE_FILE_NAME  |
@@ -324,13 +306,11 @@ caml_block_for_changes(value v_state, value v_closure)
                     FILE_NOTIFY_CHANGE_LAST_WRITE,
                     NULL, &(new_node->overlapped), NULL);
                 
-                //Raises exception if ReadDirectoryChanges function fails
                 if (success == FALSE) 
                 {
                     DWORD dw = print_error(new_node->handle);
                     win32_maperr(dw);
                     
-                    //**copy lpMsgBuf to ocaml string and pass instead of Nothing
                     uerror("ReadDirectoryChangesW failed", Nothing);
                 }
 
@@ -347,8 +327,6 @@ caml_block_for_changes(value v_state, value v_closure)
         }
     }
     
-    struct path_node* tmp;
-
     while (state->head != NULL) 
     {
        tmp = state->head;
@@ -370,8 +348,7 @@ caml_block_for_changes(value v_state, value v_closure)
     CAMLreturn(Val_unit);
 }
 
-value
-caml_stop_watching(value v_state)
+value winwatch_stop_watching(value v_state)
 {
     CAMLparam1(v_state);
     struct global_state* state = NULL;
@@ -381,7 +358,7 @@ caml_stop_watching(value v_state)
     OVERLAPPED *overlapped = NULL;
 
     state = (struct global_state*)(Nativeint_val(v_state));
-    stopReq = (struct request*)(malloc(sizeof(struct request)));
+    stopReq = malloc(sizeof(struct request));
     stopReq->type = Stop;
     
     num_bytes = 0;
