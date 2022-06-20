@@ -82,9 +82,7 @@ value winwatch_create(value v_unit)
     
     state = (struct global_state*)Data_custom_val(v_state);
     state->ops = ops;
-    state->head = malloc(sizeof(struct path_node));
-    state->head->handle = INVALID_HANDLE_VALUE;
-    state->head->next = NULL;
+    state->head = NULL;
 
     state->completion_port = CreateIoCompletionPort(
         INVALID_HANDLE_VALUE,   
@@ -102,7 +100,6 @@ value winwatch_add_path(value v_state, value v_path)
     struct global_state *state = NULL;
     struct request *add_request = NULL;
     DWORD num_bytes;
-    ULONG_PTR completion_key;
 
     str_length = strlen(String_val(v_path));
     path = caml_stat_strdup_to_utf16(String_val(v_path));
@@ -113,12 +110,11 @@ value winwatch_add_path(value v_state, value v_path)
     add_request->type = AddPath;
     add_request->path = path;
     
-    completion_key = (ULONG_PTR)add_request;
 
     BOOL success = PostQueuedCompletionStatus(
         state->completion_port,
         num_bytes,
-        completion_key,
+        (ULONG_PTR)add_request,
         NULL);
     
     if (success == FALSE) 
@@ -316,16 +312,14 @@ value winwatch_start(value v_state, value v_closure)
     while (state->head != NULL) 
     {
        tmp = state->head;
-       if (tmp->handle != INVALID_HANDLE_VALUE) 
+       
+       BOOL success = CancelIo(tmp->handle);
+       if (success == FALSE) 
        {
-           BOOL success = CancelIo(tmp->handle);
-           if (success == FALSE) 
-           {
-                caml_failwith("CancelIO failed.");
-           }
-           CloseHandle(tmp->handle);
+            caml_failwith("CancelIO failed.");
        }
        
+       CloseHandle(tmp->handle);
        free(tmp->buffer);
        free(tmp);
        state->head = (state->head)->next;
