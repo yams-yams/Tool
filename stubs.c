@@ -1,6 +1,4 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
 #include <caml/mlvalues.h>
 #include <caml/alloc.h>
 #include <caml/fail.h>
@@ -9,14 +7,14 @@
 #include <caml/memory.h>
 #include <caml/threads.h>
 #include <caml/unixsupport.h>
+#include <caml/custom.h>
 #include <windows.h>
-#include <assert.h>
-#include <intsafe.h>
 
 #define BUFF_SIZE 1024
 
 struct global_state 
 {    
+    struct custom_operations *ops;
     struct path_node *head;
     HANDLE completion_port;
     value closure;
@@ -25,7 +23,7 @@ struct global_state
 struct path_node 
 {    
     char *buffer;
-    const char *path;
+    const WCHAR *path;
     HANDLE handle;
     OVERLAPPED overlapped;
     struct path_node *next;
@@ -44,11 +42,11 @@ struct request
     union 
     {
         struct path_node* file_change;
-        const char* path;
+        const WCHAR* path;
     };
 };
 
-static DWORD print_error(HANDLE handle)
+static LPTSTR print_error(HANDLE handle)
 {
     LPTSTR lpMsgBuf;
     DWORD dw;
@@ -70,48 +68,46 @@ static DWORD print_error(HANDLE handle)
     printf("%s\n", lpMsgBuf);
     fflush(stdout);
     
-    return dw;
+    return lpMsgBuf;
 }
 
-
-value winwatch_open_port(value v_unit) 
+value winwatch_create(value v_unit) 
 {
     CAMLparam1(v_unit);    
+    value v_state;
     struct global_state *state = NULL;
-
-    state = malloc(sizeof(struct global_state));
+    struct custom_operations *ops = malloc(sizeof(struct custom_operations));
+    
+    v_state = caml_alloc_custom_mem(ops, sizeof(struct global_state), 0);
+    
+    state = (struct global_state*)Data_custom_val(v_state);
+    state->ops = ops;
     state->head = malloc(sizeof(struct path_node));
     state->head->handle = INVALID_HANDLE_VALUE;
     state->head->next = NULL;
 
-    /*Creates a completion port without associating it to a handle*/
     state->completion_port = CreateIoCompletionPort(
         INVALID_HANDLE_VALUE,   
         NULL,                  
         0,                    
         1);                  
-
-    /*Return integer value of pointer to state*/
-    CAMLreturn(caml_copy_nativeint((intnat)(state)));
+    CAMLreturn(v_state);
 }
 
 value winwatch_add_path(value v_state, value v_path) 
 {
     CAMLparam2(v_state, v_path);
     int str_length;
-    char *path = NULL;
+    WCHAR *path = NULL;
     struct global_state *state = NULL;
     struct request *add_request = NULL;
     DWORD num_bytes;
     ULONG_PTR completion_key;
-    OVERLAPPED *overlapped = NULL;
 
     str_length = strlen(String_val(v_path));
-    path = malloc(str_length + 1);
-    memcpy(path, String_val(v_path), str_length + 1);
+    path = caml_stat_strdup_to_utf16(String_val(v_path));
     
-    
-    state = (struct global_state*)(Nativeint_val(v_state)); 
+    state = (struct global_state*)(Data_custom_val(v_state));
     add_request = malloc(sizeof(struct request));
     
     add_request->type = AddPath;
@@ -123,9 +119,9 @@ value winwatch_add_path(value v_state, value v_path)
         state->completion_port,
         num_bytes,
         completion_key,
-        overlapped);
+        NULL);
     
-    if (success == 0) 
+    if (success == FALSE) 
     {
         caml_failwith("PostQueuedCompletionStatus failed.");
     }
@@ -133,32 +129,27 @@ value winwatch_add_path(value v_state, value v_path)
     CAMLreturn(Val_unit);
 }
 
-value winwatch_block_for_changes(value v_state, value v_closure) 
+value winwatch_start(value v_state, value v_closure) 
 {
     CAMLparam2(v_state, v_closure);
     CAMLlocal2(filename, action);
     
     struct global_state* state = NULL;
-    DWORD num_bytes;
+    DWORD num_bytes = 0;
     OVERLAPPED *overlapped = NULL;
-    ULONG_PTR completion_key;
-    BOOL stop;
+    BOOL stop = FALSE;
     char* path;
-    struct request* notif = NULL;
+    struct request* notif;
+    ULONG_PTR completion_key;
     struct path_node* tmp = NULL;
 
-    state = (struct global_state*)(Nativeint_val(v_state));
+    state = (struct global_state*)(Data_custom_val(v_state));
     state->closure = v_closure;
-
-    num_bytes = 0;
-    completion_key = 0;
-    stop = FALSE;
-
+    
     while (!stop) 
     {
         caml_release_runtime_system();
         
-        /*Blocks until completion port receives a packet*/
         BOOL success = GetQueuedCompletionStatus(
             state->completion_port,         
             &num_bytes,         
@@ -168,12 +159,13 @@ value winwatch_block_for_changes(value v_state, value v_closure)
 
         caml_acquire_runtime_system();
 
+        notif = (struct request*)completion_key;
+
         if (success == FALSE)
         {
-            caml_failwith("GetQCompletionStatus failed.");
+            WCHAR *error_msg = (WCHAR*) print_error(state->completion_port);
+            uerror("GetQCompletionStatus failed", caml_copy_string_of_os(error_msg));
         }
-
-        notif = (struct request*)completion_key;
 
         switch (notif->type)
         {
@@ -187,14 +179,16 @@ value winwatch_block_for_changes(value v_state, value v_closure)
             {
                 struct path_node *data = NULL;
                 FILE_NOTIFY_INFORMATION *event = NULL;
-                
+                DWORD name_len;
+                wchar_t *name;
+
                 data = notif->file_change;
                 event = (FILE_NOTIFY_INFORMATION*)data->buffer;
                 
                 /*Iterates over file change notifications*/
                 for (;;) 
                 {
-                    DWORD name_len = event->FileNameLength / sizeof(wchar_t);
+                    name_len = event->FileNameLength / sizeof(wchar_t);
 
                     switch (event->Action)
                     {
@@ -215,16 +209,15 @@ value winwatch_block_for_changes(value v_state, value v_closure)
                             break;
                     }
 
-                    wchar_t *name = malloc(2 * (name_len + 1));
+                    name = malloc(2 * (name_len + 1));
                     memcpy(name, event->FileName, 2 * name_len);
                     name[name_len] = 0;
                     filename = caml_copy_string_of_os(name);
                     free(name);
                     
-                    printf("At path %s\n", data->path);
+                    wprintf(L"At path %ls\n", data->path);
                     fflush(stdout);
 
-                    /*Calls OCaml function that prints notification */
                     caml_callback2(state->closure, action, filename);
                     
                     if (event->NextEntryOffset) 
@@ -235,7 +228,6 @@ value winwatch_block_for_changes(value v_state, value v_closure)
                     {
                         break;
                     }
-                
                 }
                 
                 memset(&(notif->file_change->overlapped), 0, sizeof(OVERLAPPED));
@@ -249,9 +241,8 @@ value winwatch_block_for_changes(value v_state, value v_closure)
                 
                 if (success == FALSE) 
                 {
-                    DWORD dw = print_error(notif->file_change->handle);
-                    win32_maperr(dw);
-                    uerror("ReadDirectoryChangesW failed", Nothing);
+                    WCHAR *error_msg = (WCHAR*)print_error(notif->file_change->handle);
+                    uerror("ReadDirectoryChangesW failed", caml_copy_string_of_os(error_msg));
                 }
             } break;
             
@@ -259,15 +250,14 @@ value winwatch_block_for_changes(value v_state, value v_closure)
             {
                 struct path_node *new_node = NULL;
                 char *change_buf = NULL;
-                struct request* changeRequest = NULL;
-                ULONG_PTR completion_key;
-
+                struct request* change_request = NULL;
+                
                 new_node = malloc(sizeof(struct path_node));
                 change_buf = malloc(BUFF_SIZE * sizeof(char));
                 new_node->buffer = change_buf;
                 new_node->path = notif->path;
 
-                new_node->handle = CreateFile(new_node->path,
+                new_node->handle = CreateFileW(new_node->path,
                     FILE_LIST_DIRECTORY,
                     FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                     NULL,
@@ -282,16 +272,14 @@ value winwatch_block_for_changes(value v_state, value v_closure)
                 
                 memset(&(new_node->overlapped), 0, sizeof(OVERLAPPED));
                 
-                changeRequest = malloc(sizeof(struct request));
-                changeRequest->type = FileChange;
-                changeRequest->file_change = new_node;
-                
-                completion_key = (ULONG_PTR) changeRequest; 
+                change_request = malloc(sizeof(struct request));
+                change_request->type = FileChange;
+                change_request->file_change = new_node;
 
                 state->completion_port = CreateIoCompletionPort(
                     new_node->handle,
                     state->completion_port,
-                    completion_key,         
+                    (ULONG_PTR)change_request,         
                     1);                     
 
                 if (state->completion_port == NULL) 
@@ -308,13 +296,11 @@ value winwatch_block_for_changes(value v_state, value v_closure)
                 
                 if (success == FALSE) 
                 {
-                    DWORD dw = print_error(new_node->handle);
-                    win32_maperr(dw);
-                    
-                    uerror("ReadDirectoryChangesW failed", Nothing);
+                    WCHAR *error_msg = (WCHAR*)print_error(new_node->handle);
+                    uerror("ReadDirectoryChangesW failed", caml_copy_string_of_os(error_msg));
                 }
 
-                printf("Watching %s\n", new_node->path);
+                wprintf(L"Watching %ls\n", new_node->path);
                 fflush(stdout);
 
                 new_node->next = state->head;
@@ -333,18 +319,20 @@ value winwatch_block_for_changes(value v_state, value v_closure)
        if (tmp->handle != INVALID_HANDLE_VALUE) 
        {
            BOOL success = CancelIo(tmp->handle);
-           if (success == 0) 
+           if (success == FALSE) 
            {
                 caml_failwith("CancelIO failed.");
            }
+           CloseHandle(tmp->handle);
        }
-       state->head = (state->head)->next;
+       
+       free(tmp->buffer);
        free(tmp);
+       state->head = (state->head)->next;
     }
     tmp = state->head;
     free(tmp);
-    free(state);
-    
+    free(state->ops);
     CAMLreturn(Val_unit);
 }
 
@@ -353,26 +341,22 @@ value winwatch_stop_watching(value v_state)
     CAMLparam1(v_state);
     struct global_state* state = NULL;
     struct request* stopReq = NULL;
-    DWORD num_bytes;
-    ULONG_PTR completion_key;
     OVERLAPPED *overlapped = NULL;
 
-    state = (struct global_state*)(Nativeint_val(v_state));
+    state = (struct global_state*)Data_custom_val(v_state);
     stopReq = malloc(sizeof(struct request));
     stopReq->type = Stop;
     
-    num_bytes = 0;
-    completion_key = (ULONG_PTR)stopReq;
-
     BOOL success = PostQueuedCompletionStatus(
         state->completion_port,
-        num_bytes,
-        completion_key,
+        0,
+        (ULONG_PTR)stopReq,
         overlapped);
     
-    if (success == 0) 
+    if (success == FALSE) 
     {
-        caml_failwith("PostQueuedCompletionStatus failed.");
+        WCHAR* error_msg = (WCHAR*)print_error(state->completion_port);
+        uerror("PostQueuedCompletionStatus", caml_copy_string_of_os(error_msg));
     }
     
     CAMLreturn(Val_unit);

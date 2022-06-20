@@ -1,11 +1,11 @@
 type action = ADD | REMOVE | MODIFY | RENAMED_OLD | RENAMED_NEW
 type t
 
-external open_port: unit -> t = "winwatch_open_port"
+external create: unit -> t = "winwatch_create"
 
 external add_path: t -> string -> unit = "winwatch_add_path"
 
-external block_for_changes: t -> (action -> string -> unit)  -> unit = "winwatch_block_for_changes" 
+external start: t -> (action -> string -> unit)  -> unit = "winwatch_start" 
 
 external stop_watching: t -> unit = "winwatch_stop_watching"
 
@@ -17,8 +17,8 @@ let handle_notif action filename =
     | RENAMED_OLD -> Printf.printf "Renamed from: %s\n%!" filename
     | RENAMED_NEW -> Printf.printf "          to: %s\n%!" filename
 
-let block state =
-  block_for_changes state handle_notif
+let start_thread state =
+  start state handle_notif
 
 let initial_paths handle = 
   match Array.to_list Sys.argv with
@@ -28,7 +28,7 @@ let initial_paths handle =
 let rec watch_input state handle =
   match input_line stdin with
     | "exit" ->
-      stop_watching state ;
+      stop_watching state;
       Thread.join handle;
       Printf.printf "File-watching has ended, main thread will exit now\n%!"
     | _ as path -> 
@@ -36,8 +36,8 @@ let rec watch_input state handle =
       watch_input state handle
 
 let () =
-  let state = open_port () in
+  let state = create () in
   initial_paths state;
-  let handle = Thread.create block state in
+  let handle = Thread.create start_thread state in
   Printf.printf "Type another path to watch or 'exit' to end directory watching\n%!";
   watch_input state handle;
