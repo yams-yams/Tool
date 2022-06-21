@@ -20,10 +20,10 @@ let handle_notif action filename =
 let start_thread state =
   start state handle_notif
 
-let initial_paths handle = 
-  match Array.to_list Sys.argv with
+let initial_paths state paths = 
+  match paths with
     | [] -> Printf.printf "No directories given\n%!"
-    | h::t -> List.iter (add_path handle) t
+    | h::t -> List.iter (add_path state) t
 
 let rec watch_input state handle =
   match input_line stdin with
@@ -35,9 +35,13 @@ let rec watch_input state handle =
       add_path state path;
       watch_input state handle
 
-let () =
+let file_watch paths =
   let state = create () in
-  initial_paths state;
+  initial_paths state paths;
   let handle = Thread.create start_thread state in
   Printf.printf "Type another path to watch or 'exit' to end directory watching\n%!";
-  watch_input state handle;
+  watch_input state handle  
+
+let () =
+  file_watch (Array.to_list Sys.argv);
+  file_watch []

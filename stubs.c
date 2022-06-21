@@ -14,10 +14,10 @@
 
 struct global_state 
 {    
-    struct custom_operations *ops;
     struct path_node *head;
     HANDLE completion_port;
-    value closure;
+    BOOL file_watching_stopped;
+    BOOL finalization_called;
 };
 
 struct path_node 
@@ -44,6 +44,31 @@ struct request
         struct path_node* file_change;
         const WCHAR* path;
     };
+};
+
+static void finalization(value v_block)
+{
+    struct global_state *state = (struct global_state*) Data_custom_val(v_block);
+    
+    if (state->file_watching_stopped)
+    {
+        free(state);
+    } 
+    else 
+    {
+        state->finalization_called = TRUE;
+    }
+    printf("finalization done\n");
+    fflush(stdout);
+}
+
+static struct custom_operations global_state_ops = 
+{
+    "global.state",             finalization,
+    custom_compare_default,     custom_hash_default,
+    custom_serialize_default,   custom_deserialize_default,
+    custom_compare_ext_default, custom_fixed_length_default
+
 };
 
 static LPTSTR print_error(HANDLE handle)
@@ -76,13 +101,12 @@ value winwatch_create(value v_unit)
     CAMLparam1(v_unit);    
     value v_state;
     struct global_state *state = NULL;
-    struct custom_operations *ops = malloc(sizeof(struct custom_operations));
     
-    v_state = caml_alloc_custom_mem(ops, sizeof(struct global_state), 0);
+    v_state = caml_alloc_custom_mem(&global_state_ops, sizeof(struct global_state), 1);
     
     state = (struct global_state*)Data_custom_val(v_state);
-    state->ops = ops;
     state->head = NULL;
+    state->file_watching_stopped = FALSE;
 
     state->completion_port = CreateIoCompletionPort(
         INVALID_HANDLE_VALUE,   
@@ -121,7 +145,6 @@ value winwatch_add_path(value v_state, value v_path)
     {
         caml_failwith("PostQueuedCompletionStatus failed.");
     }
-
     CAMLreturn(Val_unit);
 }
 
@@ -133,14 +156,13 @@ value winwatch_start(value v_state, value v_closure)
     struct global_state* state = NULL;
     DWORD num_bytes = 0;
     OVERLAPPED *overlapped = NULL;
-    BOOL stop = FALSE;
     char* path;
+    BOOL stop = FALSE;
     struct request* notif;
     ULONG_PTR completion_key;
     struct path_node* tmp = NULL;
 
     state = (struct global_state*)(Data_custom_val(v_state));
-    state->closure = v_closure;
     
     while (!stop) 
     {
@@ -214,7 +236,7 @@ value winwatch_start(value v_state, value v_closure)
                     wprintf(L"At path %ls\n", data->path);
                     fflush(stdout);
 
-                    caml_callback2(state->closure, action, filename);
+                    caml_callback2(v_closure, action, filename);
                     
                     if (event->NextEntryOffset) 
                     {
@@ -326,7 +348,9 @@ value winwatch_start(value v_state, value v_closure)
     }
     tmp = state->head;
     free(tmp);
-    free(state->ops);
+
+    state->file_watching_stopped = TRUE;
+    
     CAMLreturn(Val_unit);
 }
 
