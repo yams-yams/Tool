@@ -17,7 +17,6 @@ struct global_state
     struct path_node *head;
     HANDLE completion_port;
     BOOL file_watching_stopped;
-    BOOL finalization_called;
 };
 
 struct path_node 
@@ -46,20 +45,14 @@ struct request
     };
 };
 
-static void finalization(value v_block)
+void finalization(value v_block)
 {
-    struct global_state *state = (struct global_state*) Data_custom_val(v_block);
+    struct global_state *state = *(struct global_state**) Data_custom_val(v_block);
     
     if (state->file_watching_stopped)
     {
-        free(state);
-    } 
-    else 
-    {
-        state->finalization_called = TRUE;
-    }
-    printf("finalization done\n");
-    fflush(stdout);
+        caml_stat_free(state);
+    }    
 }
 
 static struct custom_operations global_state_ops = 
@@ -90,9 +83,6 @@ static LPTSTR print_error(HANDLE handle)
     
     CloseHandle(handle);
     
-    printf("%s\n", lpMsgBuf);
-    fflush(stdout);
-    
     return lpMsgBuf;
 }
 
@@ -102,17 +92,18 @@ value winwatch_create(value v_unit)
     value v_state;
     struct global_state *state = NULL;
     
-    v_state = caml_alloc_custom_mem(&global_state_ops, sizeof(struct global_state), 1);
-    
-    state = (struct global_state*)Data_custom_val(v_state);
+    state = caml_stat_alloc(sizeof(struct global_state));
     state->head = NULL;
     state->file_watching_stopped = FALSE;
-
     state->completion_port = CreateIoCompletionPort(
         INVALID_HANDLE_VALUE,   
         NULL,                  
         0,                    
-        1);                  
+        1); 
+    
+    v_state = caml_alloc_custom(&global_state_ops, sizeof(struct global_state *), 1, 2); 
+    *((struct global_state **)Data_custom_val(v_state)) = state;
+
     CAMLreturn(v_state);
 }
 
@@ -128,7 +119,7 @@ value winwatch_add_path(value v_state, value v_path)
     str_length = strlen(String_val(v_path));
     path = caml_stat_strdup_to_utf16(String_val(v_path));
     
-    state = (struct global_state*)(Data_custom_val(v_state));
+    state = *(struct global_state**)(Data_custom_val(v_state));
     add_request = malloc(sizeof(struct request));
     
     add_request->type = AddPath;
@@ -162,7 +153,7 @@ value winwatch_start(value v_state, value v_closure)
     ULONG_PTR completion_key;
     struct path_node* tmp = NULL;
 
-    state = (struct global_state*)(Data_custom_val(v_state));
+    state = *(struct global_state**)(Data_custom_val(v_state));
     
     while (!stop) 
     {
@@ -178,11 +169,11 @@ value winwatch_start(value v_state, value v_closure)
         caml_acquire_runtime_system();
 
         notif = (struct request*)completion_key;
-
+        
         if (success == FALSE)
         {
-            WCHAR *error_msg = (WCHAR*) print_error(state->completion_port);
-            uerror("GetQCompletionStatus failed", caml_copy_string_of_os(error_msg));
+            LPTSTR error_msg = print_error(state->completion_port);
+            uerror("GetQCompletionStatus failed", caml_copy_string(error_msg));
         }
 
         switch (notif->type)
@@ -259,8 +250,8 @@ value winwatch_start(value v_state, value v_closure)
                 
                 if (success == FALSE) 
                 {
-                    WCHAR *error_msg = (WCHAR*)print_error(notif->file_change->handle);
-                    uerror("ReadDirectoryChangesW failed", caml_copy_string_of_os(error_msg));
+                    LPTSTR error_msg = print_error(notif->file_change->handle);
+                    uerror("ReadDirectoryChangesW failed", caml_copy_string(error_msg));
                 }
             } break;
             
@@ -314,8 +305,8 @@ value winwatch_start(value v_state, value v_closure)
                 
                 if (success == FALSE) 
                 {
-                    WCHAR *error_msg = (WCHAR*)print_error(new_node->handle);
-                    uerror("ReadDirectoryChangesW failed", caml_copy_string_of_os(error_msg));
+                    LPTSTR error_msg = print_error(new_node->handle);
+                    uerror("ReadDirectoryChangesW failed", caml_copy_string(error_msg));
                 }
 
                 wprintf(L"Watching %ls\n", new_node->path);
@@ -361,7 +352,7 @@ value winwatch_stop_watching(value v_state)
     struct request* stopReq = NULL;
     OVERLAPPED *overlapped = NULL;
 
-    state = (struct global_state*)Data_custom_val(v_state);
+    state = *(struct global_state**)Data_custom_val(v_state);
     stopReq = malloc(sizeof(struct request));
     stopReq->type = Stop;
     
@@ -373,8 +364,8 @@ value winwatch_stop_watching(value v_state)
     
     if (success == FALSE) 
     {
-        WCHAR* error_msg = (WCHAR*)print_error(state->completion_port);
-        uerror("PostQueuedCompletionStatus", caml_copy_string_of_os(error_msg));
+        LPTSTR error_msg = print_error(state->completion_port);
+        uerror("PostQueuedCompletionStatus", caml_copy_string(error_msg));
     }
     
     CAMLreturn(Val_unit);
