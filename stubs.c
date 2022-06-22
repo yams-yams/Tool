@@ -61,7 +61,6 @@ static struct custom_operations global_state_ops =
     custom_compare_default,     custom_hash_default,
     custom_serialize_default,   custom_deserialize_default,
     custom_compare_ext_default, custom_fixed_length_default
-
 };
 
 static LPTSTR print_error(HANDLE handle)
@@ -70,7 +69,6 @@ static LPTSTR print_error(HANDLE handle)
     DWORD dw;
 
     dw = GetLastError();
-
     FormatMessage(
         FORMAT_MESSAGE_ALLOCATE_BUFFER |
         FORMAT_MESSAGE_FROM_SYSTEM |
