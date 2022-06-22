@@ -30,7 +30,7 @@ let rec watch_input state handle =
     | "exit" ->
       stop_watching state;
       Thread.join handle;
-      Printf.printf "File-watching has ended, main thread will exit now\n%!"
+      Printf.printf "File-watching has ended\n%!"
     | _ as path -> 
       add_path state path;
       watch_input state handle
