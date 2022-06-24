@@ -1,0 +1,6 @@
+description = ""
+requires = ""
+archive(byte) = "winwatch.cma"
+archive(native) = "winwatch.cmxa"
+plugin(byte) = "winwatch.cma"
+plugin(native) = "winwatch.cmxs"

@@ -1,0 +1,24 @@
+lib: [
+  "_build/install/default/lib/winwatch/META"
+  "_build/install/default/lib/winwatch/dune-package"
+  "_build/install/default/lib/winwatch/libwinwatch_stubs.a"
+  "_build/install/default/lib/winwatch/opam"
+  "_build/install/default/lib/winwatch/winwatch.a"
+  "_build/install/default/lib/winwatch/winwatch.cma"
+  "_build/install/default/lib/winwatch/winwatch.cmi"
+  "_build/install/default/lib/winwatch/winwatch.cmt"
+  "_build/install/default/lib/winwatch/winwatch.cmti"
+  "_build/install/default/lib/winwatch/winwatch.cmx"
+  "_build/install/default/lib/winwatch/winwatch.cmxa"
+  "_build/install/default/lib/winwatch/winwatch.ml"
+  "_build/install/default/lib/winwatch/winwatch.mli"
+]
+libexec: [
+  "_build/install/default/lib/winwatch/winwatch.cmxs"
+]
+bin: [
+  "_build/install/default/bin/winwatch.exe"
+]
+stublibs: [
+  "_build/install/default/lib/stublibs/dllwinwatch_stubs.dll"
+]
