@@ -7,7 +7,7 @@ let handle_notif action filename =
     | Winwatch.RENAMED_NEW -> Printf.printf "          to: %s\n%!" filename
 
 let start_thread state =
-  Winwatch.start state ["../../testdir1"] handle_notif
+  Winwatch.start state handle_notif
 
 let rec watch_input state handle =
   match input_line stdin with
@@ -26,7 +26,8 @@ let file_watch paths =
   Printf.printf "Type another path to watch or 'exit' to end directory watching\n%!";
   watch_input state handle  
 
-let () = 
+let () =
+  Winwatch.set_exclusions ["../../testdir1"]; 
   match Array.to_list Sys.argv with
   | [] -> ()
   | _::t -> file_watch t;

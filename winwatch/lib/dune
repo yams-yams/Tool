@@ -1,8 +1,5 @@
 (library
- (name            winwatch)
  (public_name     winwatch)
- (libraries       )
  (foreign_stubs
   (language c)
-  (names stubs)
-  (flags -I/blah/include)))
+  (names stubs)))

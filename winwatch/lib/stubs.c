@@ -138,9 +138,9 @@ value winwatch_add_path(value v_state, value v_path)
     CAMLreturn(Val_unit);
 }
 
-value winwatch_start(value v_state, value v_filter, value v_exclusions, value v_handler) 
+value winwatch_start(value v_state, value v_func) 
 {
-    CAMLparam4(v_state, v_filter, v_exclusions, v_handler);
+    CAMLparam2(v_state, v_func);
     CAMLlocal2(v_file_path, v_action);
     
     struct global_state* state = NULL;
@@ -226,8 +226,7 @@ value winwatch_start(value v_state, value v_filter, value v_exclusions, value v_
                     v_file_path = caml_copy_string_of_os(file_path);
                     free(file_path);
                     
-                    value v_args[4] = {v_action, v_file_path, v_exclusions, v_handler};
-                    caml_callbackN(v_filter, 4, v_args);
+                    caml_callback2(v_func, v_action, v_file_path);
                     
                     if (event->NextEntryOffset) 
                     {

@@ -5,9 +5,14 @@ external create: unit -> t = "winwatch_create"
 
 external add_path: t -> string -> unit = "winwatch_add_path"
 
-external start_watch: t -> (action -> string -> string list -> (action -> string -> unit) -> unit) -> string list -> (action -> string -> unit) -> unit = "winwatch_start" 
+external start_watch: t -> (action -> string -> unit) -> unit = "winwatch_start" 
 
 external stop_watching: t -> unit = "winwatch_stop_watching"
+
+let exclusions = ref []
+
+let set_exclusions paths = 
+  exclusions := paths
 
 let rec should_exclude filename paths = 
   match paths with
@@ -17,10 +22,5 @@ let rec should_exclude filename paths =
     | true -> true
     | false -> should_exclude filename t
 
-let filter_notif action filename exclusions func = 
-  if not (should_exclude filename exclusions) then
-    func action filename
-
-let start state exclusions handler =
-  start_watch state filter_notif exclusions handler
-  
+let start state handler =
+  start_watch state (fun action filename -> if not (should_exclude filename !exclusions) then handler action filename)
